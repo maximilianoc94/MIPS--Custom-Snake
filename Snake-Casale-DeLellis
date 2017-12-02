@@ -1,0 +1,779 @@
+# Proyecto 1
+#
+# Hecho por:
+#	Maximiliano Casale Carnet: 20161120297
+#	Gabriel De Lellis  Carnet: 20131110319
+
+# Uso de registros:
+#	$s0: Color   de   fondo   del   tablero.
+#	$s1: Color     de      la     serpiente.
+#	$s2: Color   de   las   frutas  (cocos).
+#	$s3: Color de los obstaculos (palmeras).
+#	$s4: Color       del       borde      1.
+#	$s5: Color       del       borde      2.
+#	$s6: Color      de     los    cangrejos.
+.data
+Bitmap: 	.space  4096	   # Tabla 32*32 words
+Fondo: 		.word   0x00d8cba1 # TABLERO             Arena 
+Snake: 		.word   0x00ff9a00 # SERPIENTE         Naranja
+Frutas: 	.word   0x00379810 # FRUTAS       Cocos Verdes
+Palmera: 	.word   0x006a4a1a # OBSTACULOS Palos Marrones
+Borde:		.word   0x002bc5cc # BORDE 1              Agua
+Borde2:         .word   0x002199e8 # BORDE 2            Agua 2
+Cangrejos:	.word	0x00ff0000 # INDICADOR           Vidas
+Cielo:		.word 	0x0099ffff # FONDO               Cielo
+Ramas:		.word	0x0000ff00 # FONDO               Ramas
+Sol:		.word	0x00ffff33 # FONDO                 Sol
+Instrucciones: 	.asciiz "                                                |SNAKE|\nProyecto realizado por:\nCasale Maximiliano y De Lellis Gabriel.\n                                        INSTRUCCIONES\nUtiliza las teclas WASD para controlar la serpiente:\nW: (Arriba) A: (Izquierda) S: (Abajo) D: (Derecha)\nP:  (Pausar Juego)\n                                              COLORES\nAnaranjado: (Serpiente) Verde: Cocos(frutas) Marrón: (Obstaculos)" # Dialogo que presenta al usuario las instruccies y controles
+TuScore:	.asciiz "¡Perdiste! Tu puntuación final fue: " # Dialogo que presenta la puntuación final del juego al usuario.
+Perdiste: 	.asciiz "¿Quieres jugar de nuevo?"             # Dialogo que permite al usuario decidir si quiere o no jugar de nuevo.
+RandomNum: 	.word 1            # Guarda el número aleatorio generado
+Siguiente:	.word 0xff000000   #
+Velocidad:	.word 1000         # Guarda   la   velocidad  del  juego.
+PosicionFruta:	.word 0            # Guarda   la   posición  de la fruta.
+PosicionFruta2: .word 0            # Guarda  la  posición  de la fruta 2.
+Vidas:		.word 3		   # Guarda el número de vidas restantes.
+PosicionSnake: 	.word 1980	   # Guarda   posición de  la  serpiente.
+PosicionCola:	.word 1980         # Guarda   la  posición  de  la  cola.
+Tiempo:		.word 0		   #
+Score: 		.word 0		   # Guarda   la  puntuación del jugador.
+Puntuacion:	.word 0		   # 
+UltMov:		.word 0		   # Guardo el ultimo movimiento realizado.
+UsoElUlt:	.word 0		   # Booleano para saber si se utilizo el ultimo movimiento o no
+.text
+.macro sleep(%tiempo)
+	li   $v0, 30
+	syscall
+	move $t2, $a0
+	CuentaSegundos:
+	li   $v0, 30
+	syscall
+	move $t3, $a0
+	sub  $t3, $t3, $t2
+	blt  $t3, %tiempo, CuentaSegundos
+.end_macro
+.macro random
+li $v0, 30
+syscall
+li $a1, 20
+li $v0, 42
+syscall
+sb $a0, RandomNum 		# Aqui va a quedar el numero
+.end_macro
+## DibujarCorazon dibuja el numero de corazones que indica cuantas vidas (o intentos) le quedan al jugador
+.macro	DibujarCorazon(%cant, %color)
+	beq %cant, 3, AbajoCor
+	beq %cant, 2, MedioCor
+	beq %cant, 1, ArribaCor
+	ArribaCor:
+	sw %color, Bitmap+644
+	sw %color, Bitmap+652
+	sw %color, Bitmap+772
+	sw %color, Bitmap+776
+	sw %color, Bitmap+780
+	sw %color, Bitmap+900
+	sw %color, Bitmap+904
+	sw %color, Bitmap+908
+	sw %color, Bitmap+1032
+	j SalirMacro	
+	MedioCor:
+	sw %color, Bitmap+1796
+	sw %color, Bitmap+1804
+	sw %color, Bitmap+1924
+	sw %color, Bitmap+1928
+	sw %color, Bitmap+1932
+	sw %color, Bitmap+2052
+	sw %color, Bitmap+2056
+	sw %color, Bitmap+2060
+	sw %color, Bitmap+2184	
+	j SalirMacro
+	AbajoCor:
+	sw %color, Bitmap+2948
+	sw %color, Bitmap+2956
+	sw %color, Bitmap+3076
+	sw %color, Bitmap+3080
+	sw %color, Bitmap+3084
+	sw %color, Bitmap+3204
+	sw %color, Bitmap+3208
+	sw %color, Bitmap+3212
+	sw %color, Bitmap+3336	
+	j SalirMacro
+SalirMacro:
+.end_macro
+.macro DinamicaDeJuego
+	lw   $t2, Tiempo
+	add  $t2,$t2, $t1	 # Tiempo total
+	sw   $t2, Tiempo
+	lw   $t0, PosicionSnake
+	jal  Timer10seg
+	jal  RespawnFruta
+	jal  RespawnFruta2
+	jal  MoverCola
+	jal  PalmeraHorizontal
+	jal  PalmeraVertical
+	sge  $s7, $t2, 3000	 # 3 segundos y arranca la cola
+.end_macro
+
+.macro Start
+	jal CrearFondo
+	jal CrearBordes
+.end_macro
+PrimeraVez:
+	##instrucciones
+	la $a0, Instrucciones
+	li $a1, 1
+	li $v0, 55
+	syscall
+	#Background
+	lw $s0, Cielo
+	lw $s1, Borde2
+	lw $s2, Fondo
+	move $t0, $zero
+	LoopCielo:
+		sw   $s0, Bitmap($t0)
+		addi $t0, $t0, 4
+		blt  $t0, 1280, LoopCielo
+	LoopAgua:
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, 4
+		blt  $t0, 2560, LoopAgua
+	LoopArena:
+		sw   $s2, Bitmap($t0)
+		addi $t0, $t0, 4
+		ble  $t0, 4092, LoopArena
+	#Diseños
+	li $t0, 884
+	lw $s0, Palmera
+	lw $s1, Ramas
+	lw $s2, Sol
+	lw $s3, Frutas
+	li $t0, 48
+	LoopSol:
+		sw   $s2, Bitmap($t0)
+		addi $t0, $t0, 4
+		sw   $s2, Bitmap($t0)
+		addi $t0, $t0, 4
+		sw   $s2, Bitmap($t0)
+		addi $t0, $t0, 4
+		sw   $s2, Bitmap($t0)
+		addi $t0, $t0, 116
+		blt  $t0, 324, LoopSol
+		#sigue
+		li $t0, 884
+	LoopPalmera:
+		sw   $s0, Bitmap($t0)
+		addi $t0, $t0, 4
+		sw   $s0, Bitmap($t0)
+		addi $t0, $t0, 124
+		blt  $t0, 3060, LoopPalmera
+		#sigue
+		li   $t0, 100
+		move $t1, $zero
+	LoopRamas1:
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, 8
+		addi $t1, $t1, 1
+		blt  $t1, 4, LoopRamas1
+		addi $t0, $t0, 224
+		move $t1, $zero
+		blt  $t0, 1148, LoopRamas1
+		#sigue
+		li   $t0, 232
+	LoopRamas2:
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, 8
+		addi $t1, $t1, 1
+		blt  $t1, 3, LoopRamas2
+		addi $t0, $t0, 232
+		move $t1, $zero
+		blt  $t0, 1016, LoopRamas2
+		#sigue
+	Cocos:
+		sw $s3, Bitmap +1396
+		sw $s3, Bitmap +1404
+		sw $s3, Bitmap +1520
+		sw $s3, Bitmap +1528
+		sw $s3, Bitmap +3184
+		sw $s3, Bitmap +3320
+		sw $s3, Bitmap +3568
+		sw $s3, Bitmap +3676
+		sw $s3, Bitmap +3816
+		sw $s3, Bitmap +3832
+		sw $s3, Bitmap +3936
+		sw $s3, Bitmap +3952
+		
+Restart:
+	Colores:
+	lw   $s0, Fondo		# Carga de colores
+	lw   $s1, Snake		
+	lw   $s2, Frutas		
+	lw   $s3, Palmera	
+	lw   $s4, Borde
+	lw   $s5, Borde2
+	lw   $s6, Cangrejos
+	li   $t0, 3
+	sw   $t0, Vidas	
+		  LoopVidas:
+		  DibujarCorazon($t0, $s6)
+		  addi $t0, $t0, -1
+		  bnez $t0, LoopVidas
+Inicio:
+	lw   $s0, Fondo		# Carga de colores
+	lw   $s1, Snake		
+	lw   $s2, Frutas		
+	lw   $s3, Palmera	
+	lw   $s4, Borde
+	lw   $s5, Borde2
+	lw   $s6, Cangrejos
+	li   $t0, 3
+	Start			
+	move $t2, $zero 
+	li   $t0, 1980
+	sw   $t0, PosicionSnake		# Posicion inicial de la snake
+	li   $t6, 1980
+	sw   $t6, PosicionCola 		#Posicion de cola
+	sw   $s1, Bitmap($t0)
+	li   $t9, 80			#Arranca en pausa
+	sw   $t9, 0xffff0004
+	li   $t1, 1000
+	sw   $t1, Velocidad 
+	lw   $t1, Velocidad 		# Velocidad del snake Inicial 1 segundo
+	li   $t2, 0
+	sw   $t2, Tiempo
+	####	Primera Fruta creada
+	random 
+	lb   $t8, RandomNum	# posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7,  RandomNum	# posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	##Calculo posicion
+	add  $t8, $t8, $t7
+	move $t7, $zero		# -> t7 libre
+	sw   $s2, Bitmap($t8)
+	sw   $t8, PosicionFruta
+	####	Segunda Fruta creada
+	random 
+	lb   $t8, RandomNum	# posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7,  RandomNum	# posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	##Calculo posicion
+	add  $t8, $t8, $t7
+	move $t7, $zero		# -> t7 libre
+	sw   $s2, Bitmap($t8)
+	sw   $t8, PosicionFruta2
+
+
+Pausa:
+	sw $t9, UltMov
+Jugar:
+	lw   $s1, Snake		 ##reset de byte de posicion del snake
+	lw   $t1, Velocidad					
+	lw   $t9, 0xffff0004     # Salvamos la palabra introducida en el Teclado Externo en $t9
+	bgtu $t9, 200, Jugar
+	beq  $t9,  80,Pausa	 # Si $t9 es igual a 80  "P" pausar
+	beq  $t9, 112,Pausa      # Si $t9 es igual a 112 "p" pausar
+	seq $t5, $t9, 87	# vemos si la letra que se ingreso es una de movimiento
+	beq $t5, 1, Mover
+	seq $t5, $t9, 68
+	beq $t5, 1, Mover
+	seq $t5, $t9, 83
+	beq $t5, 1, Mover
+	seq $t5, $t9, 65
+	beq $t5, 1, Mover
+	seq $t5, $t9, 119
+	beq $t5, 1, Mover
+	seq $t5, $t9, 100
+	beq $t5, 1, Mover
+	seq $t5, $t9, 115
+	beq $t5, 1, Mover
+	seq $t5, $t9, 97
+	beq $t5, 1, Mover
+	b SeguirConUltimo #si no es leemos el ultimo movimiento valido
+Mover:
+	lw   $t3, UltMov
+	seq  $t5, $t3, 87	# W Para Arriba
+	beq  $t5, 1, MoverHorizontal 
+	seq  $t5, $t3, 83	# S Para Abajo
+	beq  $t5, 1, MoverHorizontal 
+	seq  $t5, $t3, 119   	# w Para Arriba
+	beq  $t5, 1, MoverHorizontal 
+	seq  $t5, $t3, 115 	# s Para Abajo
+	beq  $t5, 1, MoverHorizontal 
+	seq  $t5, $t3, 68 	# D Para Derecha
+	beq  $t5, 1, MoverVertical
+	seq  $t5, $t3, 65 	# A Para Izquierda
+	beq  $t5, 1, MoverVertical
+	seq  $t5, $t3, 100  	# d Para Derecha
+	beq  $t5, 1, MoverVertical
+	seq  $t5, $t3, 97 	# a Para Izquierda
+	beq  $t5, 1, MoverVertical
+	#Despausar
+	sw $t9, UltMov
+	b Mover
+MoverHorizontal: 
+	li $t4, 0
+	sw $t4, UsoElUlt
+	beq $t9, 68,  Derecha
+	beq $t9, 100, Derecha
+	beq $t9, 65,  Izquierda
+	beq $t9, 97,  Izquierda
+	b SeguirConUltimo
+MoverVertical:
+	li $t4, 0
+	sw $t4, UsoElUlt
+	beq $t9, 87  , Arriba 
+	beq $t9, 119 , Arriba
+	beq $t9, 83  , Abajo
+	beq $t9, 115 , Abajo
+	b SeguirConUltimo
+SeguirConUltimo:
+	li $t4, 1
+	sw $t4, UsoElUlt
+	lw  $t3, UltMov
+	beq $t3, 87  , Arriba 
+	beq $t3, 119 , Arriba
+	beq $t3, 83  , Abajo
+	beq $t3, 115 , Abajo
+	beq $t3, 68,  Derecha
+	beq $t3, 100, Derecha
+	beq $t3, 65,  Izquierda
+	beq $t3, 97,  Izquierda
+	beq $t3, 80,  Pausa
+	beq $t3, 112, Pausa
+	Arriba:
+		sb   $t3, Siguiente + 3
+		lw   $t4, UsoElUlt
+		bnez $t4, NoGuardar1 # si se uso el ultimo, no guardamos el movimiento
+		sw   $t9, UltMov
+		sb   $t9, Siguiente + 3	
+	NoGuardar1:
+		DinamicaDeJuego
+		lw   $t5, Siguiente
+		add  $t5, $s1, $t5
+		sw   $t5, Bitmap($t0)
+		addi $t0, $t0, -128
+		sw   $t0, PosicionSnake
+		jal  Comer
+		lw   $t5, Bitmap($t0)
+		bne  $t5, $s0, Pierde
+		sw   $s1, Bitmap($t0)
+		sw   $t0, PosicionSnake
+sleep($t1)
+
+		b Jugar
+
+	Derecha:
+	sb   $t3, Siguiente + 3
+		lw $t4, UsoElUlt
+		bnez $t4, NoGuardar2
+		sw $t9, UltMov
+	sb   $t9, Siguiente + 3	
+	NoGuardar2:
+		DinamicaDeJuego
+		lw   $t5, Siguiente
+		add  $s1, $s1, $t5
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, 4
+		sw   $t0, PosicionSnake
+		jal  Comer
+		lw   $t5, Bitmap($t0)
+		bne  $t5, $s0, Pierde
+		sw   $s1, Bitmap($t0)
+		sw   $t0, PosicionSnake
+sleep($t1)
+		b Jugar
+	
+	Abajo:
+	sb   $t3, Siguiente + 3
+		lw $t4, UsoElUlt
+		bnez $t4, NoGuardar3
+		sw $t9, UltMov
+	sb   $t9, Siguiente + 3	
+	NoGuardar3:
+		DinamicaDeJuego
+		lw   $t5, Siguiente
+		add  $s1, $s1, $t5
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, 128
+		sw   $t0, PosicionSnake
+		jal  Comer
+		lw   $t5, Bitmap($t0)
+		bne  $t5, $s0, Pierde
+		sw   $s1, Bitmap($t0)
+		sw   $t0, PosicionSnake
+sleep($t1)
+		b Jugar	
+	Izquierda:
+	sb   $t3, Siguiente + 3
+		lw $t4, UsoElUlt
+		bnez $t4, NoGuardar4
+		sw $t9, UltMov	
+	sb   $t9, Siguiente + 3
+	NoGuardar4:
+		DinamicaDeJuego
+
+		lw   $t5, Siguiente
+		add  $s1, $s1, $t5
+		sw   $s1, Bitmap($t0)
+		addi $t0, $t0, -4
+		sw   $t0, PosicionSnake
+		jal  Comer
+		lw   $t5, Bitmap($t0)
+		bne  $t5, $s0, Pierde
+		sw   $s1, Bitmap($t0)
+		sw   $t0, PosicionSnake
+sleep($t1)
+		b Jugar	
+	Pierde:
+	#Descontar Vida
+	lw   $t6, Vidas
+	lw   $t5, Fondo
+	beq  $t6, 3, Dibujar
+	lw   $t5, Borde2
+	beq  $t6, 2, Dibujar
+	lw   $t5, Cielo
+	Dibujar:
+	DibujarCorazon($t6, $t5)
+	addi $t6, $t6, -1
+	sw   $t6, Vidas
+	bnez $t6, Inicio
+	#Imprime Score
+	lw   $t1, Score
+	li   $v0, 56
+	la   $a0, TuScore
+	move $a1, $t1
+	syscall
+	la   $a0, Perdiste
+	li   $v0, 50
+	syscall	
+	move $t2, $a0
+	beq  $t2, 0, Restart
+Fin:
+	li   $v0, 10
+	syscall
+	
+####################################################### Subrutinas ######################################################
+
+Timer10seg:
+	lw   $t2, Tiempo 
+	rem  $t4, $t2, 10000
+	bgt  $t4, 400, Break 
+	## bajar velocidad
+	rem  $t4, $t2, 30000
+	bnez $t4, salto1
+	addi $t2, $t2, 200
+	sw   $t2, Tiempo
+salto1:
+	lw   $t1, Velocidad
+	beq  $t1, 200, Break
+	addi $t1, $t1, -200
+	sw   $t1, Velocidad
+	## incrementar puntaje por tiempo
+	lw   $t5, Puntuacion
+	addi $t5, $t5, 100
+	sw   $t5, Puntuacion
+	## sumar puntaje
+	lw   $t5, Score
+	lw   $t1, Puntuacion
+	add  $t5, $t5, $t1
+	sw   $t5, Score
+	
+	Break:	
+		  jr $ra
+
+Comer:
+	lw   $t0, PosicionSnake
+	lw   $t8, PosicionFruta
+	## chequear posicion a donde va a moverse ($t0)
+	bne  $t0, $t8, Trippyfrut
+	## si es color fruta, aplicamos efecto
+	sw   $s0, Bitmap($t0)		## Borramos la fruta
+	lw   $t2, Score
+	addi $t2, $t2, 10
+	sw   $t2, Score			## sumo el score
+	random 
+	lb   $t8, RandomNum	        # posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7,  RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	## Calculo posicion
+	add  $t8, $t8, $t7
+	lw   $t7, Bitmap($t8)
+	bne  $t7, $s0, OtraVez
+	sw   $s2, Bitmap($t8)
+	sw   $t8, PosicionFruta
+	li   $s7, 0	
+	## sino sigue
+	Trippyfrut:
+	lw   $t0, PosicionSnake
+	lw   $t8, PosicionFruta2
+	## chequear posicion a donde va a moverse ($t0)
+	bne  $t0, $t8, Break1
+	## si es color fruta, aplicamos efecto
+	sw   $s0, Bitmap($t0)		## Borramos la fruta
+	lw   $t2, Score
+	addi $t2, $t2, 10
+	sw   $t2, Score			## sumo el score
+	random 
+	lb   $t8, RandomNum	        # posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7,  RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	## Calculo posicion
+	add  $t8, $t8, $t7
+	lw   $t7, Bitmap($t8)
+	bne  $t7, $s0, OtraVez
+	sw   $s2, Bitmap($t8)
+	sw   $t8, PosicionFruta2
+	li   $s7, 0
+	Break1:
+		  jr $ra
+
+CrearFondo:
+	li   $t0, 660 
+	move $t2, $zero
+	while: 	# t0 < Bitmap.length
+		sw   $s0, Bitmap($t0)
+		addi $t0, $t0,  4 	# salto de word
+		addi $t2, $t2,  1 	# cuenta bits
+		bne  $t2, 22,   while	# imprime linea
+		addi $t0, $t0,  40 	# salto de linea
+		move $t2, $zero		# cuenta bits en 0
+		ble  $t0, 3456, while	# fin del cuadro 32(horizontal)*22(verticales) words
+		  jr $ra
+
+CrearBordes:
+	li $t0, 660
+	whileArriba:
+		sw   $s4, Bitmap($t0)
+		addi $t0, $t0,  4
+		beq  $t0, 744, continuar1
+		sw   $s5, Bitmap($t0)
+		addi $t0, $t0,  4
+		ble  $t0, 744,   whileArriba # Pinta la linea de arrib
+		continuar1:
+	whileDer:
+		sw   $s5, Bitmap($t0)
+		addi $t0, $t0,  128
+		beq  $t0, 3432, continuar
+		sw   $s4, Bitmap($t0)
+		addi $t0, $t0,  128
+		ble  $t0, 3432, whileDer
+		continuar:
+	whileAbajo: 	# Alrevez
+		sw   $s5, Bitmap($t0)
+		addi $t0, $t0,  -4
+		beq  $t0, 3348, continuar2
+		sw   $s4, Bitmap($t0)
+		addi $t0, $t0,  -4
+		bgt  $t0, 3348, whileAbajo
+		continuar2:
+	whileIzq: 	# Alrevez
+		sw   $s4, Bitmap($t0)
+		addi $t0, $t0,  -128
+		sw   $s5, Bitmap($t0)
+		addi $t0, $t0,  -128
+		bgt  $t0, 660,    whileIzq
+		continuar3:
+		  jr $ra
+		  	
+PalmeraHorizontal: 
+	lw   $t2, Tiempo
+	rem  $t4, $t2, 10000
+	bgt  $t4, 400, Break4
+	bnez $s6, Break4
+	OtraVez2:	
+	random
+	lb   $t8, RandomNum		# posicion x
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7, RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	add  $t8, $t8, $t7
+	
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez2  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+				
+	addi $t8, $t8, 4
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez2  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+
+	addi $t8, $t8, -8
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez2  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+
+	addi $t8, $t8, 4
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, 4
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, -8
+	sw   $s3, Bitmap($t8)
+	  #fin
+	  Fin3:
+	Break4:	
+		  jr   $ra
+	  
+PalmeraVertical: 
+	lw   $t2, Tiempo
+	rem  $t4, $t2, 10000
+	bgt  $t4, 400, Break3
+	bnez $s6, Break3	
+	OtraVez3:
+	random
+	lb   $t8, RandomNum		# posicion x
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7, RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	add  $t8, $t8, $t7
+	ble  $t8, 868, Opc1
+	bge  $t8, 3224,Opc2
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, 128
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, -256
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	b Fin2
+	Opc1:
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, 128
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, 128
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)	
+	b Fin2
+	Opc2:
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, -128
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	addi $t8, $t8, -128
+	lw   $s7, Bitmap($t8)
+	bne  $s7, $s0, OtraVez3  	# Verificamos que no se genere un obstaculo encima de algo que no sea arena
+	sw   $s3, Bitmap($t8)
+	  #fin
+	  Fin2:
+	Break3:
+		  slti $s6, $t4, 400	
+		  jr   $ra
+
+RespawnFruta:
+	lw   $t2, Tiempo
+	rem  $t4, $t2, 10000
+	bgt  $t4, 400, Break2
+	bnez $s6, Break2
+	lw   $t8, PosicionFruta
+	sw   $s0, Bitmap($t8)
+	OtraVez:
+	random
+	lb   $t8, RandomNum	        # posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7, RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	## Calculo posicion
+	add  $t8, $t8, $t7
+	lw   $t7, Bitmap($t8)
+	bne  $t7, $s0, OtraVez
+	sw   $s2, Bitmap($t8)	
+	sw   $t8, PosicionFruta
+	Break2:
+		  jr   $ra	
+		  
+RespawnFruta2:
+	lw   $t2, Tiempo
+	rem  $t4, $t2, 10000
+	bgt  $t4, 400, Break5
+	bnez $s6, Break5
+	lw   $t8, PosicionFruta2
+	sw   $s0, Bitmap($t8)
+	OtraVez5:
+	random
+	lb   $t8, RandomNum	        # posicion x 
+	mul  $t8, $t8, 4
+	addi $t8, $t8, 24
+	random
+	lb   $t7, RandomNum	        # posicion y
+	mul  $t7, $t7, 128
+	addi $t7, $t7, 768
+	## Calculo posicion
+	add  $t8, $t8, $t7
+	lw   $t7, Bitmap($t8)
+	bne  $t7, $s0, OtraVez5
+	sw   $s2, Bitmap($t8)	
+	sw   $t8, PosicionFruta2
+	Break5:
+		  jr   $ra
+		  	  		  	  		  
+		  	  		  	  		  	  		  	  		  
+		  
+MoverCola:
+	bne $s7, 1, Salir
+	lw  $t6, PosicionCola
+	lw  $t8, Bitmap($t6)
+	srl $t8, $t8, 24
+	beq $t8, 87  ,ArribaCola	# W Para Arriba
+	beq $t8, 68  ,DerechaCola	# D Para Derecha
+	beq $t8, 83  ,AbajoCola		# S Para Abajo
+	beq $t8, 65  ,IzquierdaCola	# A Para Izquierda
+	beq $t8, 119 ,ArribaCola    	# w Para Arriba
+	beq $t8, 100 ,DerechaCola   	# d Para Derecha
+	beq $t8, 115 ,AbajoCola 	# s Para Abajo
+	beq $t8, 97  ,IzquierdaCola 	# a Para Izquierda
+	j Salir
+	ArribaCola:
+		sw   $s0, Bitmap($t6)
+		addi $t6, $t6, -128
+		sw   $t6, PosicionCola
+		b Salir
+	DerechaCola:
+		sw   $s0, Bitmap($t6)
+		addi $t6, $t6, 4
+		sw   $t6, PosicionCola
+		b Salir
+	
+	AbajoCola:
+		sw   $s0, Bitmap($t6)
+		addi $t6, $t6, 128
+		sw   $t6, PosicionCola
+		b Salir	
+	IzquierdaCola:
+		sw   $s0, Bitmap($t6)
+		addi $t6, $t6, -4
+		sw   $t6, PosicionCola
+		b Salir	
+Salir:
+jr $ra
